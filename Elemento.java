@@ -1,5 +1,8 @@
 import java.util.concurrent.Semaphore;
 
+/** 
+ * Cada elemento (Azul ou Zumbi) será uma thread.
+ */
 public abstract class Elemento extends Thread {
     protected int x, y; // Posição atual
     protected Tabuleiro tabuleiro;
@@ -23,9 +26,10 @@ public abstract class Elemento extends Thread {
     public int getTipo() {
         return tipo;
     }
-    
+
     @Override
     public abstract void run();
 
+    // Métodos auxiliares podem ser adicionados aqui (ex: verificar vizinhos)
 }
 

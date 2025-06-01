@@ -3,12 +3,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * Representa o tabuleiro do jogo.
+ * Contém a grade, os semáforos para cada célula e gerencia os elementos.
+ */
 public class Tabuleiro {
     private final int altura;
     private final int largura;
     private final int[][] grid; // 0: vazio, 1: Azul, 2: Zumbi
     private final Semaphore[][] semaforos;
-    private final List<Elemento> elementos; 
+    private final List<Elemento> elementos; // Lista para manter referência aos elementos/threads
     private volatile boolean jogoAcabou = false;
     private String mensagemFim = "";
     private final Random random = new Random();
@@ -20,6 +24,7 @@ public class Tabuleiro {
         this.semaforos = new Semaphore[altura][largura];
         this.elementos = new ArrayList<>();
 
+        // Inicializa semáforos (um para cada célula, permitindo apenas 1 acesso)
         for (int i = 0; i < altura; i++) {
             for (int j = 0; j < largura; j++) {
                 semaforos[i][j] = new Semaphore(1);
@@ -67,7 +72,7 @@ public class Tabuleiro {
         }
     }
 
-    // --- Métodos de Gerenciamento de Elementos (Estrutura Inicial) ---
+    // --- Métodos de Gerenciamento de Elementos ---
 
     public synchronized void adicionarElemento(Elemento elemento) {
         if (DentroDosLimites(elemento.getXPos(), elemento.getYPos()) && grid[elemento.getXPos()][elemento.getYPos()] == 0) {
@@ -80,6 +85,7 @@ public class Tabuleiro {
     }
 
     public synchronized void moverElemento(int xAntigo, int yAntigo, int xNovo, int yNovo, Elemento elemento) {
+        // Assume que os semáforos necessários já foram adquiridos
         if (DentroDosLimites(xAntigo, yAntigo) && DentroDosLimites(xNovo, yNovo)) {
             grid[xAntigo][yAntigo] = 0; // Libera posição antiga
             grid[xNovo][yNovo] = elemento.getTipo(); // Ocupa nova posição
@@ -87,13 +93,49 @@ public class Tabuleiro {
     }
 
     public synchronized Elemento verificarVizinhoAzul(int x, int y) {
-        return null;
+        // Verifica as 8 células adjacentes em busca de um Azul
+        int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
+        int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
+        
+        for (int i = 0; i < 8; i++) {
+            int nx = x + dx[i];
+            int ny = y + dy[i];
+            
+            if (DentroDosLimites(nx, ny) && grid[nx][ny] == 1) {
+                // Encontrou um Azul, agora precisa encontrar o objeto Elemento correspondente
+                for (Elemento e : elementos) {
+                    if (e.getTipo() == 1 && e.getXPos() == nx && e.getYPos() == ny && e.isAlive()) {
+                        return e;
+                    }
+                }
+            }
+        }
+        return null; // Nenhum Azul encontrado nas células adjacentes
     }
 
     public synchronized void converterParaZumbi(Elemento azul) {
+        if (azul == null || azul.getTipo() != 1) return;
+        
+        int azulX = azul.getXPos();
+        int azulY = azul.getYPos();
+        
+        System.out.println("Elemento Azul em (" + azulX + "," + azulY + ") foi convertido para Zumbi!");
+        
+        // Parar a thread do azul
+        azul.interrupt();
+        
+        // Remover da lista de elementos
+        elementos.remove(azul);
+        
+        // Atualizar grid
+        grid[azulX][azulY] = 2; // Marca como Zumbi
+        
+        // Criar e adicionar novo zumbi
+        Zumbi novoZumbi = new Zumbi(azulX, azulY, this);
+        elementos.add(novoZumbi);
+        novoZumbi.start();
 
-        System.out.println("Elemento Azul em (" + azul.getXPos() + "," + azul.getYPos() + ") foi convertido!");
-
+        // Verificar condição de fim (todos zumbis)
         verificarFimTodosZumbis();
     }
 
@@ -122,7 +164,7 @@ public class Tabuleiro {
         }
     }
 
-    public boolean isJogoAcabou() {
+    public boolean JogoAcabou() {
         return jogoAcabou;
     }
 
@@ -130,7 +172,7 @@ public class Tabuleiro {
         return mensagemFim;
     }
 
-    // Método para imprimir o tabuleiro
+    // Método para imprimir o tabuleiro (para debug)
     public synchronized void imprimirTabuleiro() {
         System.out.println("--- Tabuleiro ---");
         for (int i = 0; i < altura; i++) {
@@ -144,5 +186,17 @@ public class Tabuleiro {
         }
         System.out.println("-----------------");
     }
+    
+    // Método para obter estatísticas atuais (para debug e monitoramento)
+    public synchronized String getEstatisticas() {
+        int contAzul = 0;
+        int contZumbi = 0;
+        
+        for (Elemento e : elementos) {
+            if (e.getTipo() == 1 && e.isAlive()) contAzul++;
+            else if (e.getTipo() == 2 && e.isAlive()) contZumbi++;
+        }
+        
+        return "Estatísticas: " + contAzul + " Azuis, " + contZumbi + " Zumbis";
+    }
 }
-
