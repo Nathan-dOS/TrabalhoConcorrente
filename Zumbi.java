@@ -1,7 +1,13 @@
 import java.util.Random;
+import java.util.concurrent.locks.Lock;
+import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
+
 
 /**
  * Representa um elemento do tipo Zumbi.
+ * Lógica adaptada para a nova estrutura do Tabuleiro com locks e listas por célula,
+ * e para a nova regra de conversão (entrar na célula do Azul).
  */
 public class Zumbi extends Elemento {
     private final Random random = new Random();
@@ -12,84 +18,130 @@ public class Zumbi extends Elemento {
 
     @Override
     public void run() {
-        // Loop principal da thread Zumbi
-        while (!tabuleiro.JogoAcabou()) {
+        while (!tabuleiro.isJogoAcabou() && !Thread.currentThread().isInterrupted()) {
+            Lock currentLock = null;
+            Lock destLock = null;
             try {
                 // Tempo aleatório entre movimentos (100-1000ms)
                 Thread.sleep(random.nextInt(901) + 100);
+
+                if (tabuleiro.isJogoAcabou() || Thread.currentThread().isInterrupted()) break;
+
+                int currentX = this.x;
+                int currentY = this.y;
+
+                // 1. Adquirir lock da posição atual
+                currentLock = tabuleiro.getLock(currentX, currentY);
+                if (currentLock == null) continue; 
+                currentLock.lock();
+
+                // Verificar se ainda estamos na lista desta célula
+                boolean stillHere = false;
+                for(Elemento e : tabuleiro.getOcupantes(currentX, currentY)){
+                    if(e == this){
+                        stillHere = true;
+                        break;
+                    }
+                }
+                if (!stillHere || Thread.currentThread().isInterrupted()) {
+                    break; // Fomos removidos ou interrompidos
+                }
+
+                // 2. Verificar vizinhos em busca de Azuis
+                Elemento vizinhoAzul = tabuleiro.verificarVizinhoAzul(currentX, currentY);
+
+                boolean moved = false;
+                if (vizinhoAzul != null) {
+                    // 3. Tentar mover para a célula do Azul para converter
+                    int azulX = vizinhoAzul.getXPos();
+                    int azulY = vizinhoAzul.getYPos();
+
+                    destLock = tabuleiro.getLock(azulX, azulY);
+                    if (destLock != null && destLock.tryLock()) {
+                        try {
+                            // Re-verificar se o Azul ainda está lá e é o único ocupante
+                            List<Elemento> ocupantesAzul = tabuleiro.getOcupantes(azulX, azulY);
+                            if (ocupantesAzul.size() == 1 && ocupantesAzul.get(0) == vizinhoAzul && vizinhoAzul.isAlive()) {
+                                
+                                System.out.println("Zumbi ID " + getId() + " movendo de (" + currentX + "," + currentY + ") para converter Azul em (" + azulX + "," + azulY + ")");
+                                // Mover Zumbi para a célula do Azul
+                                tabuleiro.moverElemento(currentX, currentY, azulX, azulY, this);
+                                this.updatePosition(azulX, azulY);
+                                moved = true;
+
+                                // Chamar conversão (Tabuleiro lida com a lógica interna)
+                                tabuleiro.converterParaZumbi(vizinhoAzul, this);
+                                // A lógica de tentar mover o Zumbi original para fora está em converterParaZumbi
+                            }
+                        } finally {
+                            destLock.unlock();
+                            destLock = null;
+                        }
+                    }
+                }
                 
-                if (tabuleiro.JogoAcabou()) break;
-                
-                // 1. Tentar adquirir semáforo da posição atual
-                tabuleiro.acquireSemaphore(x, y);
-                
-                try {
-                    // Verificar se o jogo acabou antes de continuar
-                    if (tabuleiro.JogoAcabou()) break;
-                    
-                    // 2. Verificar vizinhos em busca de Azuis ("frente a")
-                    Elemento vizinhoAzul = tabuleiro.verificarVizinhoAzul(x, y);
-                    
-                    if (vizinhoAzul != null) {
-                        // Tentar adquirir semáforo do vizinho Azul
-                        int azulX = vizinhoAzul.getXPos();
-                        int azulY = vizinhoAzul.getYPos();
-                        
-                        if (tabuleiro.tryAcquireSemaphore(azulX, azulY)) {
+                // 4. Se não tentou/conseguiu converter, tenta mover aleatoriamente
+                if (!moved) {
+                    // Escolher direção aleatória
+                    int dx, dy;
+                    do {
+                        dx = random.nextInt(3) - 1;
+                        dy = random.nextInt(3) - 1;
+                    } while (dx == 0 && dy == 0);
+
+                    int novoX = currentX + dx;
+                    int novoY = currentY + dy;
+
+                    if (tabuleiro.isDentroDosLimites(novoX, novoY)) {
+                        destLock = tabuleiro.getLock(novoX, novoY);
+                        if (destLock != null && destLock.tryLock()) {
                             try {
-                                // Verificar se o Azul ainda está na posição (pode ter se movido)
-                                if (tabuleiro.getPosicao(azulX, azulY) == 1) {
-                                    // Converter Azul para Zumbi
-                                    tabuleiro.converterParaZumbi(vizinhoAzul);
+                                List<Elemento> ocupantesDestino = tabuleiro.getOcupantes(novoX, novoY);
+                                boolean podeMover = false;
+                                Elemento azulParaConverter = null;
+
+                                if (ocupantesDestino.isEmpty()) {
+                                    podeMover = true; // Vazia, pode mover
+                                } else if (ocupantesDestino.size() == 1 && ocupantesDestino.get(0).getTipo() == 1 && ocupantesDestino.get(0).isAlive()) {
+                                    podeMover = true; // Contém um Azul vivo, pode mover (Zumbi entra para converter)
+                                    azulParaConverter = ocupantesDestino.get(0);
+                                } // else: Contém um Zumbi ou 2 elementos -> não pode mover
+
+                                if (podeMover) {
+                                    // Mover o elemento
+                                    tabuleiro.moverElemento(currentX, currentY, novoX, novoY, this);
+                                    this.updatePosition(novoX, novoY);
+                                    moved = true;
+
+                                    // Se moveu para célula com Azul, iniciar conversão
+                                    if (azulParaConverter != null) {
+                                         System.out.println("Zumbi ID " + getId() + " moveu para (" + novoX + "," + novoY + ") e encontrou Azul para converter.");
+                                         tabuleiro.converterParaZumbi(azulParaConverter, this);
+                                    }
                                 }
                             } finally {
-                                tabuleiro.releaseSemaphore(azulX, azulY);
-                            }
-                        }
-                    } else {
-                        // Se não converteu, tenta mover
-                        // 3. Escolher direção aleatória
-                        int dx, dy;
-                        do {
-                            dx = random.nextInt(3) - 1; // -1, 0 ou 1
-                            dy = random.nextInt(3) - 1; // -1, 0 ou 1
-                        } while (dx == 0 && dy == 0); // Evita ficar parado
-                        
-                        // 4. Calcular nova posição
-                        int novoX = x + dx;
-                        int novoY = y + dy;
-                        
-                        // 5. Verificar limites do tabuleiro
-                        if (tabuleiro.DentroDosLimites(novoX, novoY)) {
-                            // 6. Tentar adquirir semáforo da nova posição
-                            boolean semaphoreAcquired = tabuleiro.tryAcquireSemaphore(novoX, novoY);
-                            
-                            if (semaphoreAcquired) {
-                                try {
-                                    // 7. Verificar se a nova posição está vazia
-                                    if (tabuleiro.getPosicao(novoX, novoY) == 0) {
-                                        // 8. Mover o elemento
-                                        tabuleiro.moverElemento(x, y, novoX, novoY, this);
-                                        this.x = novoX;
-                                        this.y = novoY;
-                                    }
-                                } finally {
-                                    // 9. Liberar semáforo da nova posição
-                                    tabuleiro.releaseSemaphore(novoX, novoY);
-                                }
+                                destLock.unlock();
+                                destLock = null;
                             }
                         }
                     }
-                } finally {
-                    // 10. Liberar semáforo da posição antiga
-                    tabuleiro.releaseSemaphore(x, y);
                 }
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                System.out.println("Thread Zumbi em (" + x + "," + y + ") interrompida.");
+                System.out.println("Thread Zumbi ID " + getId() + " em (" + x + "," + y + ") interrompida.");
                 break;
+            } finally {
+                // Liberar lock da posição atual (se adquirido)
+                if (currentLock != null && ((ReentrantLock)currentLock).isHeldByCurrentThread()) {
+                    currentLock.unlock();
+                }
+                 // Garantir liberação do lock de destino em caso de erro
+                if (destLock != null && ((ReentrantLock)destLock).isHeldByCurrentThread()) {
+                    destLock.unlock();
+                }
             }
         }
+        System.out.println("Thread Zumbi ID " + getId() + " terminando.");
     }
 }

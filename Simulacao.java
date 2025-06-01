@@ -5,6 +5,7 @@ import java.util.List;
 
 /**
  * Classe principal que inicia e gerencia a simulação.
+ * CORRIGIDO: Usa getOcupantes().isEmpty() e adicionarElementoInicial().
  */
 public class Simulacao {
 
@@ -58,9 +59,11 @@ public class Simulacao {
             int y = 0; // Coluna inicial dos Azuis
             do {
                 x = random.nextInt(altura); // Linha aleatória
-            } while (tabuleiro.getPosicao(x, y) != 0); // Garante posição vazia na coluna 0
+                // CORRIGIDO: Usa getOcupantes().isEmpty() para verificar se a célula está vazia
+            } while (!tabuleiro.getOcupantes(x, y).isEmpty()); // Garante posição vazia na coluna 0
             Azul azul = new Azul(x, y, tabuleiro);
-            tabuleiro.adicionarElemento(azul);
+            // CORRIGIDO: Usa adicionarElementoInicial()
+            tabuleiro.adicionarElementoInicial(azul);
             elementosParaIniciar.add(azul);
             System.out.println("Azul " + (i+1) + " posicionado em (" + x + "," + y + ")");
         }
@@ -71,10 +74,12 @@ public class Simulacao {
             int x;
             int y = largura - 1; // Coluna inicial dos Zumbis
             do {
-                x = random.nextInt(altura);
-            } while (tabuleiro.getPosicao(x, y) != 0); // Garante posição vazia na última coluna
+                x = random.nextInt(altura); // Linha aleatória
+                 // CORRIGIDO: Usa getOcupantes().isEmpty() para verificar se a célula está vazia
+            } while (!tabuleiro.getOcupantes(x, y).isEmpty()); // Garante posição vazia na última coluna
             Zumbi zumbi = new Zumbi(x, y, tabuleiro);
-            tabuleiro.adicionarElemento(zumbi);
+            // CORRIGIDO: Usa adicionarElementoInicial()
+            tabuleiro.adicionarElementoInicial(zumbi);
             elementosParaIniciar.add(zumbi);
             System.out.println("Zumbi " + (i+1) + " posicionado em (" + x + "," + y + ")");
         }
@@ -89,10 +94,10 @@ public class Simulacao {
 
         // --- Loop Principal da Simulação (Monitoramento) ---
         int iteracao = 0;
-        while (!tabuleiro.JogoAcabou()) {
+        while (!tabuleiro.isJogoAcabou()) {
             try {
-                Thread.sleep(500); // Pausa para verificar o estado (a cada meio segundo)
-
+                Thread.sleep(1000); // Pausa para verificar o estado (a cada segundo)
+                
                 // Imprimir tabuleiro e estatísticas periodicamente
                 if (iteracao % 5 == 0 && iteracao > 0) { // A cada 5 segundos (exceto no início)
                     System.out.println("\n--- Iteração " + iteracao + " ---");
@@ -124,7 +129,9 @@ public class Simulacao {
 
         // Esperar as threads terminarem (opcional, mas boa prática)
         System.out.println("Aguardando finalização das threads...");
-        for (Elemento e : elementosParaIniciar) {
+        // Usar cópia da lista para evitar ConcurrentModificationException se a lista mestre for modificada
+        List<Elemento> copiaElementos = new ArrayList<>(elementosParaIniciar);
+        for (Elemento e : copiaElementos) {
             try {
                 e.join(1000); // Espera a thread terminar com timeout de 1 segundo
             } catch (InterruptedException ex) {
