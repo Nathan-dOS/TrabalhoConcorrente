@@ -3,10 +3,6 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.List;
 
-/**
- * Representa um elemento do tipo Azul.
- * Lógica adaptada para a nova estrutura do Tabuleiro com locks e listas por célula.
- */
 public class Azul extends Elemento {
     private final Random random = new Random();
 
@@ -33,7 +29,7 @@ public class Azul extends Elemento {
                 if (currentLock == null) continue; // Posição inválida?
                 currentLock.lock();
 
-                // Verificar se ainda estamos na lista desta célula (não fomos convertidos)
+                // Verificar se ainda estao na lista desta célula 
                 boolean stillHere = false;
                 for(Elemento e : tabuleiro.getOcupantes(currentX, currentY)){
                     if(e == this){
@@ -78,7 +74,7 @@ public class Azul extends Elemento {
                                 // Atualiza posição interna
                                 this.updatePosition(novoX, novoY);
 
-                                // 8. Verificar condição de vitória (chegou à direita)
+                                // 8. Verificar condição de vitória
                                 if (this.y == tabuleiro.getLargura() - 1) {
                                     tabuleiro.terminarJogo("Azul ID " + getId() + " venceu! Chegou à borda direita.");
                                     break; // Sai do loop da thread
