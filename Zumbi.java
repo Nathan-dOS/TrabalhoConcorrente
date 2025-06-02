@@ -64,9 +64,8 @@ public class Zumbi extends Elemento {
                                 this.updatePosition(azulX, azulY);
                                 moved = true;
 
-                                // Chamar conversão (Tabuleiro lida com a lógica interna)
+                                // Chamar conversão 
                                 tabuleiro.converterParaZumbi(vizinhoAzul, this);
-                                // A lógica de tentar mover o Zumbi original para fora está em converterParaZumbi
                             }
                         } finally {
                             destLock.unlock();
@@ -75,7 +74,7 @@ public class Zumbi extends Elemento {
                     }
                 }
                 
-                // 4. Se não tentou/conseguiu converter, tenta mover aleatoriamente
+                // 4. Se não tentou/conseguiu converter, move aleatoriamente
                 if (!moved) {
                     // Escolher direção aleatória
                     int dx, dy;
