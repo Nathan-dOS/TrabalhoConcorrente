@@ -4,11 +4,6 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 
-/**
- * Representa um elemento do tipo Zumbi.
- * Lógica adaptada para a nova estrutura do Tabuleiro com locks e listas por célula,
- * e para a nova regra de conversão (entrar na célula do Azul).
- */
 public class Zumbi extends Elemento {
     private final Random random = new Random();
 
