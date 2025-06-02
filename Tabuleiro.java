@@ -5,18 +5,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Representa o tabuleiro do jogo.
- * Contém a grade (agora uma lista de Elementos por célula), os locks para cada célula e gerencia os elementos.
- */
+
 public class Tabuleiro {
     private final int altura;
     private final int largura;
-    // Alterado: Cada célula agora contém uma lista de elementos presentes.
-    // Usar CopyOnWriteArrayList pode ser uma alternativa se a leitura for muito mais frequente que a escrita,
-    // mas com locks, ArrayList sincronizado externamente é suficiente.
+    // Cada célula agora contém uma lista de elementos presentes.
     private final List<Elemento>[][] grid;
-    // Alterado: Usando ReentrantLock para mais flexibilidade.
+    // Usando ReentrantLock.
     private final Lock[][] locks;
     private final List<Elemento> elementos; // Lista mestre para manter referência a todas as threads
     private volatile boolean jogoAcabou = false;
@@ -52,10 +47,6 @@ public class Tabuleiro {
     // Acesso à lista DEVE ser protegido pelo lock da célula correspondente
     public List<Elemento> getOcupantes(int x, int y) {
         if (isDentroDosLimites(x, y)) {
-            // Não precisa sincronizar aqui, pois a leitura da referência é atômica.
-            // A sincronização é necessária ao iterar ou modificar a lista retornada,
-            // mas como retornamos uma cópia, a thread chamadora opera na cópia.
-            // A modificação da lista original SÓ ocorre dentro de blocos lock(locks[x][y])
             return new ArrayList<>(grid[x][y]);
         }
         return new ArrayList<>(); // Retorna lista vazia se fora dos limites
@@ -71,12 +62,12 @@ public class Tabuleiro {
         if (isDentroDosLimites(x, y)) {
             return locks[x][y];
         }
-        return null; // Ou lançar exceção
+        return null; // Ou exceção
     }
 
     // --- Métodos de Gerenciamento de Elementos ---
 
-    // Adiciona elemento na posição inicial. Assume que a posição está validada como vazia.
+    // Adiciona elemento na posição inicial.
     public void adicionarElementoInicial(Elemento elemento) {
         int x = elemento.getXPos();
         int y = elemento.getYPos();
@@ -84,7 +75,7 @@ public class Tabuleiro {
             Lock lock = locks[x][y];
             lock.lock();
             try {
-                if (grid[x][y].isEmpty()) { // Confirma se está vazia (embora já devesse estar)
+                if (grid[x][y].isEmpty()) { // Confirma se está vazia
                     grid[x][y].add(elemento);
                     elementos.add(elemento); // Adiciona à lista mestre
                 } else {
@@ -98,7 +89,7 @@ public class Tabuleiro {
         }
     }
 
-    // Move um elemento. Assume que os locks necessários (origem e destino) JÁ ESTÃO ADQUIRIDOS pela thread chamadora.
+    // Move um elemento.
     public void moverElemento(int xAntigo, int yAntigo, int xNovo, int yNovo, Elemento elemento) {
         if (isDentroDosLimites(xAntigo, yAntigo) && isDentroDosLimites(xNovo, yNovo)) {
             grid[xAntigo][yAntigo].remove(elemento); // Remove da lista da célula antiga
@@ -110,8 +101,6 @@ public class Tabuleiro {
 
     // Verifica células adjacentes em busca de um Azul.
     // Retorna o primeiro Elemento Azul encontrado, ou null.
-    // IMPORTANTE: Este método NÃO adquire locks. A thread chamadora deve garantir a sincronização necessária
-    // se precisar de um estado consistente dos vizinhos.
     public Elemento verificarVizinhoAzul(int x, int y) {
         int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
         int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
@@ -137,8 +126,7 @@ public class Tabuleiro {
         return null; // Nenhum Azul encontrado
     }
 
-    // Converte um Azul para Zumbi. Assume que o lock da célula (convX, convY) JÁ ESTÁ ADQUIRIDO pela thread Zumbi.
-    // O zumbiOriginal é o que entrou na célula e causou a conversão.
+    // Converte um Azul para Zumbi.
     public void converterParaZumbi(Elemento azul, Elemento zumbiOriginal) {
         if (azul == null || azul.getTipo() != 1 || !azul.isAlive() || zumbiOriginal == null || zumbiOriginal.getTipo() != 2) {
              System.err.println("!!! Tentativa de conversão inválida.");
@@ -181,7 +169,6 @@ public class Tabuleiro {
     }
 
     // Tenta mover um Zumbi para uma célula adjacente vazia aleatória.
-    // Assume que o lock da célula atual (currentX, currentY) JÁ ESTÁ ADQUIRIDO.
     private boolean tentarMoverImediatamente(Elemento zumbi, int currentX, int currentY) {
         int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
         int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
@@ -200,7 +187,7 @@ public class Tabuleiro {
                         if (grid[nx][ny].isEmpty()) { // Verifica se está vazia
                             // Move imediatamente
                             grid[nx][ny].add(zumbi); // Adiciona ao destino
-                            // A remoção da célula atual (currentX, currentY) será feita em converterParaZumbi se retornar true
+                            // A remoção da célula atual será feita em converterParaZumbi se retornar true
                             zumbi.updatePosition(nx, ny); // Atualiza posição interna do elemento
                             System.out.println("Zumbi original ID " + zumbi.getId() + " saiu imediatamente para (" + nx + "," + ny + ")");
                             return true; // Movido com sucesso
@@ -215,7 +202,6 @@ public class Tabuleiro {
     }
 
     // Verifica se todos os elementos restantes são Zumbis.
-    // Deve ser chamado dentro de um bloco synchronized(elementos)
     private void verificarFimTodosZumbis() {
         boolean todosZumbis = true;
         int azulCount = 0;
@@ -241,7 +227,6 @@ public class Tabuleiro {
             System.out.println("Motivo: " + mensagem);
             System.out.println("=======================================================\n");
             // Interromper todas as threads de elementos na lista mestre
-            // Usar cópia para evitar ConcurrentModificationException
             List<Elemento> copiaElementos = new ArrayList<>(elementos);
             for (Elemento e : copiaElementos) {
                 e.interrupt();
@@ -292,7 +277,7 @@ public class Tabuleiro {
         System.out.println("---------------------------------------------------");
     }
 
-    // Método para obter estatísticas atuais (adaptado para lista mestre)
+    // Método para obter estatísticas atuais
     public String getEstatisticas() {
         int contAzul = 0;
         int contZumbi = 0;
