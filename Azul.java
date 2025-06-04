@@ -1,14 +1,19 @@
 import java.util.Random;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
 
 /**
  * Representa um elemento do tipo Azul.
- * Lógica adaptada para a nova estrutura do Tabuleiro com locks e listas por célula.
+ * Lógica de movimento com bias progressivo implementada.
  */
 public class Azul extends Elemento {
     private final Random random = new Random();
+    private static final double PROB_INICIAL_DIRECAO = 1.0 / 8.0; // Chance igual inicial
+    private static final double INCREMENTO_BIAS_POR_SEGUNDO = 0.005; // 0.5% por segundo
+    private static final double MAX_PROB_BIAS = 0.40; // Máximo de 40%
 
     public Azul(int x, int y, Tabuleiro tabuleiro) {
         super(x, y, tabuleiro, 1); // Tipo 1 para Azul
@@ -18,9 +23,8 @@ public class Azul extends Elemento {
     public void run() {
         while (!tabuleiro.isJogoAcabou() && !Thread.currentThread().isInterrupted()) {
             Lock currentLock = null;
-            Lock destLock = null;
             try {
-                // Tempo aleatório entre movimentos (100-1000ms)
+                // Tempo aleatório entre movimentos
                 Thread.sleep(random.nextInt(901) + 100);
 
                 if (tabuleiro.isJogoAcabou() || Thread.currentThread().isInterrupted()) break;
@@ -30,82 +34,109 @@ public class Azul extends Elemento {
 
                 // 1. Adquirir lock da posição atual
                 currentLock = tabuleiro.getLock(currentX, currentY);
-                if (currentLock == null) continue; // Posição inválida?
+                if (currentLock == null) continue;
                 currentLock.lock();
 
-                // Verificar se ainda estamos na lista desta célula (não fomos convertidos)
-                boolean stillHere = false;
-                for(Elemento e : tabuleiro.getOcupantes(currentX, currentY)){
-                    if(e == this){
-                        stillHere = true;
-                        break;
-                    }
-                }
-                if (!stillHere || Thread.currentThread().isInterrupted()) {
-                    // Fomos removidos ou interrompidos enquanto esperávamos o lock
-                    break;
+                // Verificar se ainda estamos na célula (não fomos convertidos)
+                if (tabuleiro.getPosicao(currentX, currentY) != this.tipo || Thread.currentThread().isInterrupted()) {
+                    break; // Fomos convertidos ou interrompidos
                 }
 
-                // 2. Escolher direção aleatória
-                int dx, dy;
-                do {
-                    dx = random.nextInt(3) - 1; // -1, 0 ou 1
-                    dy = random.nextInt(3) - 1; // -1, 0 ou 1
-                } while (dx == 0 && dy == 0); // Evita ficar parado
-
-                // 3. Calcular nova posição
-                int novoX = currentX + dx;
-                int novoY = currentY + dy;
-
-                // 4. Verificar limites do tabuleiro
-                if (tabuleiro.isDentroDosLimites(novoX, novoY)) {
-                    // 5. Tentar adquirir lock da nova posição
-                    destLock = tabuleiro.getLock(novoX, novoY);
-                    if (destLock != null && destLock.tryLock()) {
-                        try {
-                            // 6. Verificar ocupantes da nova posição
-                            List<Elemento> ocupantesDestino = tabuleiro.getOcupantes(novoX, novoY);
-                            boolean podeMover = false;
-                            if (ocupantesDestino.isEmpty()) {
-                                podeMover = true; // Vazia, pode mover
-                            } else if (ocupantesDestino.size() == 1 && ocupantesDestino.get(0).getTipo() == 2) {
-                                podeMover = true; // Contém apenas um Zumbi, pode mover (Azul entra)
-                            } // else: Contém um Azul ou 2 elementos -> não pode mover
-
-                            if (podeMover) {
-                                // 7. Mover o elemento (Tabuleiro atualiza listas)
-                                tabuleiro.moverElemento(currentX, currentY, novoX, novoY, this);
-                                // Atualiza posição interna
-                                this.updatePosition(novoX, novoY);
-
-                                // 8. Verificar condição de vitória (chegou à direita)
-                                if (this.y == tabuleiro.getLargura() - 1) {
-                                    tabuleiro.terminarJogo("Azul ID " + getId() + " venceu! Chegou à borda direita.");
-                                    break; // Sai do loop da thread
-                                }
-                            }
-                        } finally {
-                            // 9. Liberar lock da nova posição
-                            destLock.unlock();
-                            destLock = null; // Garante que não será liberado de novo no finally externo
-                        }
-                    }
+                // --- Tentar Mover com Bias --- 
+                boolean moved = tentarMoverComBias(currentX, currentY);
+                
+                // --- Verificar Vizinhos Pós-Movimento (ou se não moveu) ---
+                int checkX = this.x;
+                int checkY = this.y;
+                
+                if (!tabuleiro.isJogoAcabou() && !Thread.currentThread().isInterrupted()) {
+                    verificarVizinhosParaAutoConversao(checkX, checkY);
                 }
+
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt(); // Restaura o status de interrupção
-                System.out.println("Thread Azul ID " + getId() + " em (" + x + "," + y + ") interrompida.");
-                break; // Sai do loop se interrompida
+                Thread.currentThread().interrupt();
+                System.out.println("Thread Azul ID " + getId() + " interrompida.");
+                break;
             } finally {
-                // 10. Liberar lock da posição antiga (se adquirido)
+                // Liberar lock da posição atual (se adquirido)
                 if (currentLock != null && ((ReentrantLock)currentLock).isHeldByCurrentThread()) {
                     currentLock.unlock();
-                }
-                // Garante que o lock de destino seja liberado se algo deu errado entre tryLock e o finally interno
-                if (destLock != null && ((ReentrantLock)destLock).isHeldByCurrentThread()) {
-                    destLock.unlock();
                 }
             }
         }
         System.out.println("Thread Azul ID " + getId() + " terminando.");
+    }
+
+    // Tenta mover o elemento com bias progressivo. Retorna true se moveu, false caso contrário.
+    // Assume que o lock da célula atual (currentX, currentY) JÁ ESTÁ ADQUIRIDO.
+    private boolean tentarMoverComBias(int currentX, int currentY) {
+        long segundosPassados = tabuleiro.getSegundosPassados();
+        double probDireita = Math.min(MAX_PROB_BIAS, PROB_INICIAL_DIRECAO + INCREMENTO_BIAS_POR_SEGUNDO * segundosPassados);
+        double probOutras = (1.0 - probDireita) / 7.0; // Probabilidade para cada uma das outras 7 direções
+
+        int dx = 0;
+        int dy = 0;
+        boolean direcaoPreferidaEscolhida = false;
+
+        // Tenta a direção preferida (direita)
+        if (random.nextDouble() < probDireita) {
+            dx = 0;
+            dy = 1;
+            direcaoPreferidaEscolhida = true;
+            int novoX = currentX + dx;
+            int novoY = currentY + dy;
+            if (tabuleiro.tentarMoverElemento(currentX, currentY, novoX, novoY, this)) {
+                if (this.y == tabuleiro.getLargura() - 1) {
+                    tabuleiro.terminarJogo("Azul ID " + getId() + " venceu! Chegou à borda direita.");
+                }
+                return true; // Moveu na direção preferida
+            }
+            // Se não conseguiu mover na direção preferida, tentará outra aleatória abaixo
+        }
+
+        // Se não escolheu/conseguiu mover na direção preferida, tenta uma das outras 7
+        List<int[]> outrasDirecoes = new ArrayList<>();
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                if (i == 0 && j == 0) continue; // Ignora ficar parado
+                if (i == 0 && j == 1 && direcaoPreferidaEscolhida) continue; // Já tentou a preferida
+                outrasDirecoes.add(new int[]{i, j});
+            }
+        }
+        Collections.shuffle(outrasDirecoes, random); // Randomiza a ordem das outras direções
+
+        for (int[] dir : outrasDirecoes) {
+            dx = dir[0];
+            dy = dir[1];
+            int novoX = currentX + dx;
+            int novoY = currentY + dy;
+            if (tabuleiro.tentarMoverElemento(currentX, currentY, novoX, novoY, this)) {
+                 if (this.y == tabuleiro.getLargura() - 1) {
+                    tabuleiro.terminarJogo("Azul ID " + getId() + " venceu! Chegou à borda direita.");
+                }
+                return true; // Moveu em outra direção
+            }
+        }
+
+        return false; // Não conseguiu mover em nenhuma direção
+    }
+    
+    // Verifica vizinhos em busca de Zumbis para requisitar auto-conversão
+    private void verificarVizinhosParaAutoConversao(int currentX, int currentY) {
+        int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
+        int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
+
+        for (int i = 0; i < 8; i++) {
+            int nx = currentX + dx[i];
+            int ny = currentY + dy[i];
+
+            if (tabuleiro.isDentroDosLimites(nx, ny)) {
+                if (tabuleiro.getPosicao(nx, ny) == 2) {
+                    System.out.println("Azul ID " + getId() + " detectou Zumbi em (" + nx + "," + ny + ") e requisitará auto-conversão.");
+                    tabuleiro.requisitarAutoConversao(this);
+                    return; 
+                }
+            }
+        }
     }
 }

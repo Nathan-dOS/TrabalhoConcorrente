@@ -7,34 +7,34 @@ import java.util.Random;
 
 /**
  * Representa o tabuleiro do jogo.
- * Contém a grade (agora uma lista de Elementos por célula), os locks para cada célula e gerencia os elementos.
+ * REVERTIDO: Usa int[][] grid para ocupação única.
+ * Mantém Lock[][] para sincronizar conversões.
  */
 public class Tabuleiro {
     private final int altura;
     private final int largura;
-    // Alterado: Cada célula agora contém uma lista de elementos presentes.
-    // Usar CopyOnWriteArrayList pode ser uma alternativa se a leitura for muito mais frequente que a escrita,
-    // mas com locks, ArrayList sincronizado externamente é suficiente.
-    private final List<Elemento>[][] grid;
-    // Alterado: Usando ReentrantLock para mais flexibilidade.
+    // REVERTIDO: Ocupação única por célula (0: vazio, 1: Azul, 2: Zumbi)
+    private final int[][] grid;
+    // Mantido: Locks para sincronizar acesso durante conversões
     private final Lock[][] locks;
-    private final List<Elemento> elementos; // Lista mestre para manter referência a todas as threads
+    // Mantido: Lista mestre sincronizada para referência às threads
+    public final List<Elemento> elementos;
     private volatile boolean jogoAcabou = false;
     private String mensagemFim = "";
     private final Random random = new Random();
+    private long tempoInicioSimulacao;
 
-    @SuppressWarnings("unchecked")
     public Tabuleiro(int altura, int largura) {
         this.altura = altura;
         this.largura = largura;
-        this.grid = new ArrayList[altura][largura];
+        this.grid = new int[altura][largura]; // Inicializa com 0 (vazio)
         this.locks = new ReentrantLock[altura][largura];
-        this.elementos = Collections.synchronizedList(new ArrayList<>()); // Lista mestre sincronizada
+        this.elementos = Collections.synchronizedList(new ArrayList<>());
+        this.tempoInicioSimulacao = System.currentTimeMillis(); // Marca o tempo inicial
 
-        // Inicializa a grade com listas vazias e os locks
+        // Inicializa os locks
         for (int i = 0; i < altura; i++) {
             for (int j = 0; j < largura; j++) {
-                grid[i][j] = new ArrayList<>(); // Lista específica da célula
                 locks[i][j] = new ReentrantLock();
             }
         }
@@ -47,18 +47,19 @@ public class Tabuleiro {
     public int getLargura() {
         return largura;
     }
+    
+    public long getSegundosPassados() {
+        return (System.currentTimeMillis() - tempoInicioSimulacao) / 1000;
+    }
 
-    // Retorna uma cópia da lista de ocupantes para evitar modificação externa e problemas de concorrência
-    // Acesso à lista DEVE ser protegido pelo lock da célula correspondente
-    public List<Elemento> getOcupantes(int x, int y) {
+    // Retorna o tipo de elemento na célula ou 0 se vazia, -1 se fora dos limites.
+    // Acesso à grid não precisa de lock aqui, pois a leitura de int é atômica.
+    // Locks são usados para operações de *modificação* ou leitura-modificação complexas (conversão).
+    public int getPosicao(int x, int y) {
         if (isDentroDosLimites(x, y)) {
-            // Não precisa sincronizar aqui, pois a leitura da referência é atômica.
-            // A sincronização é necessária ao iterar ou modificar a lista retornada,
-            // mas como retornamos uma cópia, a thread chamadora opera na cópia.
-            // A modificação da lista original SÓ ocorre dentro de blocos lock(locks[x][y])
-            return new ArrayList<>(grid[x][y]);
+            return grid[x][y];
         }
-        return new ArrayList<>(); // Retorna lista vazia se fora dos limites
+        return -1; // Indica fora dos limites
     }
 
     public boolean isDentroDosLimites(int x, int y) {
@@ -71,7 +72,7 @@ public class Tabuleiro {
         if (isDentroDosLimites(x, y)) {
             return locks[x][y];
         }
-        return null; // Ou lançar exceção
+        return null;
     }
 
     // --- Métodos de Gerenciamento de Elementos ---
@@ -81,97 +82,110 @@ public class Tabuleiro {
         int x = elemento.getXPos();
         int y = elemento.getYPos();
         if (isDentroDosLimites(x, y)) {
-            Lock lock = locks[x][y];
-            lock.lock();
-            try {
-                if (grid[x][y].isEmpty()) { // Confirma se está vazia (embora já devesse estar)
-                    grid[x][y].add(elemento);
-                    elementos.add(elemento); // Adiciona à lista mestre
-                } else {
-                    System.err.println("!!! Erro ao adicionar elemento inicial em (" + x + "," + y + "): Célula não estava vazia!");
-                }
-            } finally {
-                lock.unlock();
+            // Não precisa de lock para escrita inicial assumindo que Simulacao garante não sobreposição.
+            if (grid[x][y] == 0) {
+                grid[x][y] = elemento.getTipo();
+                elementos.add(elemento); // Adiciona à lista mestre
+            } else {
+                System.err.println("!!! Erro ao adicionar elemento inicial em (" + x + "," + y + "): Célula não estava vazia!");
             }
         } else {
             System.err.println("Erro ao adicionar elemento inicial em (" + x + "," + y + "): Posição inválida.");
         }
     }
 
-    // Move um elemento. Assume que os locks necessários (origem e destino) JÁ ESTÃO ADQUIRIDOS pela thread chamadora.
-    public void moverElemento(int xAntigo, int yAntigo, int xNovo, int yNovo, Elemento elemento) {
-        if (isDentroDosLimites(xAntigo, yAntigo) && isDentroDosLimites(xNovo, yNovo)) {
-            grid[xAntigo][yAntigo].remove(elemento); // Remove da lista da célula antiga
-            grid[xNovo][yNovo].add(elemento);     // Adiciona à lista da célula nova
-        } else {
-             System.err.println("!!! Erro ao mover elemento: Posição inválida.");
+    // Move um elemento. Assume que o lock da célula de ORIGEM está adquirido pela thread.
+    // Tenta adquirir o lock do DESTINO.
+    public boolean tentarMoverElemento(int xAntigo, int yAntigo, int xNovo, int yNovo, Elemento elemento) {
+        if (!isDentroDosLimites(xAntigo, yAntigo) || !isDentroDosLimites(xNovo, yNovo)) {
+            return false; // Posições inválidas
         }
-    }
 
-    // Verifica células adjacentes em busca de um Azul.
-    // Retorna o primeiro Elemento Azul encontrado, ou null.
-    // IMPORTANTE: Este método NÃO adquire locks. A thread chamadora deve garantir a sincronização necessária
-    // se precisar de um estado consistente dos vizinhos.
-    public Elemento verificarVizinhoAzul(int x, int y) {
-        int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
-        int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
+        Lock lockDestino = locks[xNovo][yNovo];
+        boolean lockDestinoAdquirido = false;
 
-        for (int i = 0; i < 8; i++) {
-            int nx = x + dx[i];
-            int ny = y + dy[i];
-
-            if (isDentroDosLimites(nx, ny)) {
-                Lock vizinhoLock = locks[nx][ny];
-                vizinhoLock.lock();
-                try {
-                    for (Elemento e : grid[nx][ny]) {
-                        if (e.getTipo() == 1 && e.isAlive()) {
-                            return e; // Encontrou um Azul vivo
-                        }
-                    }
-                } finally {
-                    vizinhoLock.unlock();
+        try {
+            lockDestinoAdquirido = lockDestino.tryLock(); // Tenta adquirir lock do destino
+            if (lockDestinoAdquirido) {
+                if (grid[xNovo][yNovo] == 0) { // Verifica se destino está vazio
+                    grid[xNovo][yNovo] = elemento.getTipo(); // Ocupa nova posição
+                    grid[xAntigo][yAntigo] = 0; // Libera posição antiga
+                    elemento.updatePosition(xNovo, yNovo); // Atualiza posição interna do elemento
+                    return true; // Movimento bem-sucedido
                 }
             }
+        } finally {
+            if (lockDestinoAdquirido) {
+                lockDestino.unlock(); // Libera lock do destino se foi adquirido
+            }
         }
-        return null; // Nenhum Azul encontrado
+        return false; // Movimento falhou (destino ocupado ou não conseguiu lock)
     }
-
-    // Converte um Azul para Zumbi. Assume que o lock da célula (convX, convY) JÁ ESTÁ ADQUIRIDO pela thread Zumbi.
-    // O zumbiOriginal é o que entrou na célula e causou a conversão.
-    public void converterParaZumbi(Elemento azul, Elemento zumbiOriginal) {
-        if (azul == null || azul.getTipo() != 1 || !azul.isAlive() || zumbiOriginal == null || zumbiOriginal.getTipo() != 2) {
-             System.err.println("!!! Tentativa de conversão inválida.");
-             return;
+    
+    // --- Lógica de Conversão Centralizada --- 
+    
+    // Método chamado pelo Azul quando detecta um Zumbi adjacente
+    public void requisitarAutoConversao(Azul azul) {
+        if (jogoAcabou || azul == null || !azul.isAlive()) return;
+        
+        int x = azul.getXPos();
+        int y = azul.getYPos();
+        Lock lockAzul = getLock(x, y);
+        if (lockAzul == null) return;
+        
+        lockAzul.lock(); // Bloqueia a célula do Azul
+        try {
+            // Revalida: A célula ainda contém este Azul e ele está vivo?
+            if (grid[x][y] == 1 && azul.isAlive()) {
+                 System.out.println("Azul ID " + azul.getId() + " em (" + x + "," + y + ") requisitou auto-conversão.");
+                 realizarConversao(azul, x, y);
+            } else {
+                 //System.out.println("Auto-conversão cancelada para Azul ID " + azul.getId() + " em (" + x + "," + y + ") - Estado mudou.");
+            }
+        } finally {
+            lockAzul.unlock();
         }
-
-        int convX = azul.getXPos();
-        int convY = azul.getYPos();
-
-        System.out.println("Convertendo Azul em (" + convX + "," + convY + ") por Zumbi ID " + zumbiOriginal.getId());
-
-        // 1. Parar a thread do Azul e remover das listas
+    }
+    
+    // Método chamado pelo Zumbi quando detecta um Azul adjacente
+    public void requisitarConversao(Elemento azulDetectado) {
+        if (jogoAcabou || azulDetectado == null || azulDetectado.getTipo() != 1 || !azulDetectado.isAlive()) return;
+        
+        int x = azulDetectado.getXPos();
+        int y = azulDetectado.getYPos();
+        Lock lockAzul = getLock(x, y);
+        if (lockAzul == null) return;
+        
+        lockAzul.lock(); // Bloqueia a célula do Azul
+        try {
+             // Revalida: A célula ainda contém este Azul e ele está vivo?
+            if (grid[x][y] == 1 && azulDetectado.isAlive()) {
+                 System.out.println("Conversão requisitada para Azul ID " + azulDetectado.getId() + " em (" + x + "," + y + ").");
+                 realizarConversao((Azul)azulDetectado, x, y);
+            } else {
+                 //System.out.println("Conversão cancelada para Azul ID " + azulDetectado.getId() + " em (" + x + "," + y + ") - Estado mudou.");
+            }
+        } finally {
+            lockAzul.unlock();
+        }
+    }
+    
+    // Método privado que efetivamente realiza a conversão. Assume que o lock da célula (convX, convY) JÁ ESTÁ ADQUIRIDO.
+    private void realizarConversao(Azul azul, int convX, int convY) {
+        System.out.println("Realizando conversão do Azul ID " + azul.getId() + " em (" + convX + "," + convY + ") para Zumbi!");
+        
+        // 1. Parar a thread do Azul e remover da lista mestre
         azul.interrupt();
-        elementos.remove(azul); // Remove da lista mestre
-        grid[convX][convY].remove(azul); // Remove da lista da célula
-
-        // 2. Criar e adicionar novo Zumbi na célula
+        elementos.remove(azul);
+        
+        // 2. Atualizar grid para Zumbi
+        grid[convX][convY] = 2; // Marca como Zumbi
+        
+        // 3. Criar e adicionar novo Zumbi
         Zumbi novoZumbi = new Zumbi(convX, convY, this);
-        grid[convX][convY].add(novoZumbi); // Adiciona novo Zumbi à célula
         elementos.add(novoZumbi); // Adiciona à lista mestre
         novoZumbi.start();
         System.out.println("Novo Zumbi ID " + novoZumbi.getId() + " criado em (" + convX + "," + convY + ")");
-
-
-        // 3. Tentar mover o Zumbi original para fora imediatamente
-        boolean movedOut = tentarMoverImediatamente(zumbiOriginal, convX, convY);
-        if (movedOut) {
-            // Se moveu, remove o original da célula de conversão
-            grid[convX][convY].remove(zumbiOriginal);
-        } else {
-            System.out.println("Zumbi original ID " + zumbiOriginal.getId() + " não conseguiu sair imediatamente de (" + convX + "," + convY + ")");
-            // Permanece temporariamente na célula com o novo Zumbi
-        }
 
         // 4. Verificar condição de fim (todos zumbis)
         // Usar synchronized na lista mestre para verificação segura
@@ -180,59 +194,23 @@ public class Tabuleiro {
         }
     }
 
-    // Tenta mover um Zumbi para uma célula adjacente vazia aleatória.
-    // Assume que o lock da célula atual (currentX, currentY) JÁ ESTÁ ADQUIRIDO.
-    private boolean tentarMoverImediatamente(Elemento zumbi, int currentX, int currentY) {
-        int[] dx = {-1, -1, -1, 0, 0, 1, 1, 1};
-        int[] dy = {-1, 0, 1, -1, 1, -1, 0, 1};
-        List<Integer> possibleMoves = new ArrayList<>();
-        for (int i = 0; i < 8; i++) possibleMoves.add(i);
-        Collections.shuffle(possibleMoves, random); // Randomiza ordem de verificação
-
-        for (int i : possibleMoves) {
-            int nx = currentX + dx[i];
-            int ny = currentY + dy[i];
-
-            if (isDentroDosLimites(nx, ny)) {
-                Lock destLock = locks[nx][ny];
-                if (destLock.tryLock()) { // Tenta adquirir lock do destino
-                    try {
-                        if (grid[nx][ny].isEmpty()) { // Verifica se está vazia
-                            // Move imediatamente
-                            grid[nx][ny].add(zumbi); // Adiciona ao destino
-                            // A remoção da célula atual (currentX, currentY) será feita em converterParaZumbi se retornar true
-                            zumbi.updatePosition(nx, ny); // Atualiza posição interna do elemento
-                            System.out.println("Zumbi original ID " + zumbi.getId() + " saiu imediatamente para (" + nx + "," + ny + ")");
-                            return true; // Movido com sucesso
-                        }
-                    } finally {
-                        destLock.unlock(); // Libera lock do destino
-                    }
-                }
-            }
-        }
-        return false; // Não encontrou célula vazia adjacente ou não conseguiu lock
-    }
-
     // Verifica se todos os elementos restantes são Zumbis.
     // Deve ser chamado dentro de um bloco synchronized(elementos)
     private void verificarFimTodosZumbis() {
-        boolean todosZumbis = true;
         int azulCount = 0;
         for (Elemento e : elementos) {
             if (e.getTipo() == 1 && e.isAlive()) {
-                //todosZumbis = false;
-                //break;
-                azulCount++; // Conta Azuis vivos
+                azulCount++;
             }
         }
-        //if (todosZumbis) {
         if(azulCount == 0 && !elementos.isEmpty()){ // Garante que não acabou só porque a lista está vazia
+            // Pequena pausa para garantir que a mensagem de conversão apareça antes do fim de jogo
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
             terminarJogo("Todos os elementos são Zumbis!");
         }
     }
 
-    // Termina o jogo. Usa synchronized para garantir que a mensagem e a flag sejam definidas atomicamente.
+    // Termina o jogo. Usa synchronized para garantir atomicidade.
     public synchronized void terminarJogo(String mensagem) {
         if (!jogoAcabou) {
             this.jogoAcabou = true;
@@ -241,7 +219,6 @@ public class Tabuleiro {
             System.out.println("Motivo: " + mensagem);
             System.out.println("=======================================================\n");
             // Interromper todas as threads de elementos na lista mestre
-            // Usar cópia para evitar ConcurrentModificationException
             List<Elemento> copiaElementos = new ArrayList<>(elementos);
             for (Elemento e : copiaElementos) {
                 e.interrupt();
@@ -257,55 +234,52 @@ public class Tabuleiro {
         return mensagemFim;
     }
 
-    // Método para imprimir o tabuleiro (adaptado para listas)
-    public void imprimirTabuleiro() {
-        System.out.println("--- Tabuleiro (" + getEstatisticas() + ") ---");
+    // Método para imprimir o tabuleiro (adaptado para int[][])
+    public String getTabuleiroString() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < altura; i++) {
             for (int j = 0; j < largura; j++) {
-                Lock lock = locks[i][j];
-                lock.lock();
-                try {
-                    List<Elemento> ocupantes = grid[i][j];
-                    if (ocupantes.isEmpty()) {
-                        sb.append(". ");
-                    } else if (ocupantes.size() == 1) {
-                        sb.append(ocupantes.get(0).getTipo() == 1 ? "A " : "Z ");
-                    } else { // Deve ter 1 Azul e 1 Zumbi (ou Zumbi original + novo Zumbi temporariamente)
-                        boolean temAzul = false;
-                        boolean temZumbi = false;
-                        for(Elemento e : ocupantes) {
-                            if(e.getTipo() == 1) temAzul = true;
-                            if(e.getTipo() == 2) temZumbi = true;
-                        }
-                        if(temAzul && temZumbi) sb.append("X "); // Conflito/Conversão
-                        else if (temZumbi) sb.append("2Z"); // Dois zumbis temporariamente
-                        else sb.append("? "); // Estado inesperado
-                    }
-                } finally {
-                    lock.unlock();
-                }
+                 // Leitura simples da grid, não precisa de lock aqui
+                 int tipo = grid[i][j];
+                 if (tipo == 0) sb.append(". ");
+                 else if (tipo == 1) sb.append("A ");
+                 else sb.append("Z ");
             }
             sb.append("\n");
         }
-        System.out.print(sb.toString());
-        System.out.println("---------------------------------------------------");
+        return sb.toString();
+    }
+    
+    public void imprimirTabuleiro() {
+         System.out.println("--- Tabuleiro (" + getEstatisticas() + ") ---");
+         System.out.print(getTabuleiroString());
+         System.out.println("---------------------------------------------------");
     }
 
     // Método para obter estatísticas atuais (adaptado para lista mestre)
     public String getEstatisticas() {
         int contAzul = 0;
         int contZumbi = 0;
-        // Sincroniza na lista mestre para contagem segura
         synchronized (elementos) {
             for (Elemento e : elementos) {
-                if (e.isAlive()) { // Conta apenas threads vivas
+                if (e.isAlive()) {
                     if (e.getTipo() == 1) contAzul++;
                     else if (e.getTipo() == 2) contZumbi++;
                 }
             }
         }
         return contAzul + " Azuis, " + contZumbi + " Zumbis vivos";
+    }
+    
+    // Retorna a grid atual (para GUI). Retorna cópia para segurança.
+    public int[][] getGridCopy() {
+        int[][] copy = new int[altura][largura];
+        for (int i = 0; i < altura; i++) {
+            // System.arraycopy é eficiente, mas a leitura da grid int[][] é atômica por linha,
+            // para consistência visual completa, um lock global seria necessário, mas é overkill aqui.
+            System.arraycopy(grid[i], 0, copy[i], 0, largura);
+        }
+        return copy;
     }
 }
 

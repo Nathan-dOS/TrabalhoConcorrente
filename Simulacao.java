@@ -1,11 +1,11 @@
+import javafx.application.Application;
 import java.util.Scanner;
 import java.util.Random;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Classe principal que inicia e gerencia a simulação.
- * CORRIGIDO: Usa getOcupantes().isEmpty() e adicionarElementoInicial().
+ * Classe principal que configura a simulação e lança a GUI JavaFX.
  */
 public class Simulacao {
 
@@ -19,125 +19,80 @@ public class Simulacao {
         Tabuleiro tabuleiro = new Tabuleiro(altura, largura);
 
         System.out.println("--- Configuração da Simulação ---");
-        System.out.print("Digite a quantidade inicial de elementos Azuis: ");
-        int numAzuis;
-        try {
-            numAzuis = scanner.nextInt();
-            if (numAzuis > altura) {
-                System.out.println("Aviso: Número de Azuis maior que a altura do tabuleiro. Reduzindo para " + altura);
-                numAzuis = altura;
-            }
-        } catch (Exception e) {
-            numAzuis = 5; // Valor padrão se houver erro de entrada
-            System.out.println("Entrada inválida. Usando valor padrão: " + numAzuis);
-        }
+        System.out.print("Digite a quantidade inicial de elementos Azuis (máx " + altura + "): ");
+        int numAzuis = lerInteiro(scanner, 5, altura);
         
-        System.out.print("Digite a quantidade inicial de elementos Zumbis: ");
-        int numZumbis;
-        try {
-            numZumbis = scanner.nextInt();
-            if (numZumbis > altura) {
-                System.out.println("Aviso: Número de Zumbis maior que a altura do tabuleiro. Reduzindo para " + altura);
-                numZumbis = altura;
-            }
-        } catch (Exception e) {
-            numZumbis = 5; // Valor padrão se houver erro de entrada
-            System.out.println("Entrada inválida. Usando valor padrão: " + numZumbis);
-        }
-        scanner.close(); // Fechar scanner após uso
+        System.out.print("Digite a quantidade inicial de elementos Zumbis (máx " + altura + "): ");
+        int numZumbis = lerInteiro(scanner, 5, altura);
+        scanner.close();
 
-        System.out.println("Iniciando simulação com " + numAzuis + " Azuis e " + numZumbis + " Zumbis.");
+        System.out.println("Configurando simulação com " + numAzuis + " Azuis e " + numZumbis + " Zumbis.");
 
         List<Elemento> elementosParaIniciar = new ArrayList<>();
 
-        // --- Posicionamento Inicial (Nova Regra) ---
-
+        // --- Posicionamento Inicial ---
         // Posiciona Azuis (coluna y = 0)
-        System.out.println("Posicionando Azuis na coluna 0...");
         for (int i = 0; i < numAzuis; i++) {
             int x;
-            int y = 0; // Coluna inicial dos Azuis
+            int y = 0;
             do {
-                x = random.nextInt(altura); // Linha aleatória
-                // CORRIGIDO: Usa getOcupantes().isEmpty() para verificar se a célula está vazia
-            } while (!tabuleiro.getOcupantes(x, y).isEmpty()); // Garante posição vazia na coluna 0
+                x = random.nextInt(altura);
+            } while (tabuleiro.getPosicao(x, y) != 0); // Garante posição vazia
             Azul azul = new Azul(x, y, tabuleiro);
-            // CORRIGIDO: Usa adicionarElementoInicial()
             tabuleiro.adicionarElementoInicial(azul);
             elementosParaIniciar.add(azul);
-            System.out.println("Azul " + (i+1) + " posicionado em (" + x + "," + y + ")");
         }
 
         // Posiciona Zumbis (coluna y = largura - 1)
-        System.out.println("Posicionando Zumbis na coluna " + (largura - 1) + "...");
         for (int i = 0; i < numZumbis; i++) {
             int x;
-            int y = largura - 1; // Coluna inicial dos Zumbis
+            int y = largura - 1;
             do {
-                x = random.nextInt(altura); // Linha aleatória
-                 // CORRIGIDO: Usa getOcupantes().isEmpty() para verificar se a célula está vazia
-            } while (!tabuleiro.getOcupantes(x, y).isEmpty()); // Garante posição vazia na última coluna
+                x = random.nextInt(altura);
+            } while (tabuleiro.getPosicao(x, y) != 0); // Garante posição vazia
             Zumbi zumbi = new Zumbi(x, y, tabuleiro);
-            // CORRIGIDO: Usa adicionarElementoInicial()
             tabuleiro.adicionarElementoInicial(zumbi);
             elementosParaIniciar.add(zumbi);
-            System.out.println("Zumbi " + (i+1) + " posicionado em (" + x + "," + y + ")");
         }
 
-        System.out.println("Elementos posicionados. Iniciando threads...");
-        tabuleiro.imprimirTabuleiro(); // Mostra estado inicial
+        System.out.println("Elementos posicionados. Passando dados para a GUI e iniciando...");
 
-        // --- Inicia as Threads ---
-        for (Elemento e : elementosParaIniciar) {
-            e.start();
+        // --- Passa os dados para a classe GUI e lança --- 
+        SimulacaoGUI.setTabuleiro(tabuleiro);
+        SimulacaoGUI.setElementos(elementosParaIniciar);
+        
+        // Lança a aplicação JavaFX. Isso bloqueará até a GUI ser fechada.
+        Application.launch(SimulacaoGUI.class, args);
+        
+        // Código após o fechamento da GUI (se necessário)
+        System.out.println("\nSimulação (e GUI) encerrada.");
+        if (tabuleiro.isJogoAcabou()) {
+             System.out.println("Resultado final: " + tabuleiro.getMensagemFim());
+             System.out.println(tabuleiro.getEstatisticas());
+        } else {
+             System.out.println("Simulação interrompida antes do fim.");
         }
-
-        // --- Loop Principal da Simulação (Monitoramento) ---
-        int iteracao = 0;
-        while (!tabuleiro.isJogoAcabou()) {
-            try {
-                Thread.sleep(1000); // Pausa para verificar o estado (a cada segundo)
-                
-                // Imprimir tabuleiro e estatísticas periodicamente
-                if (iteracao % 5 == 0 && iteracao > 0) { // A cada 5 segundos (exceto no início)
-                    System.out.println("\n--- Iteração " + iteracao + " ---");
-                    tabuleiro.imprimirTabuleiro();
-                    System.out.println(tabuleiro.getEstatisticas());
-                }
-                
-                iteracao++;
-                
-                // Verificar se a simulação está demorando muito (opcional)
-                if (iteracao > 300) { // 5 minutos
-                    System.out.println("Simulação atingiu tempo limite (300s).");
-                    tabuleiro.terminarJogo("Tempo limite atingido.");
-                    break;
-                }
-                
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                System.out.println("Thread principal da simulação interrompida.");
-                break;
+    }
+    
+    // Helper para ler inteiro com valor padrão e limite
+    private static int lerInteiro(Scanner scanner, int padrao, int maximo) {
+        int valor;
+         try {
+            valor = scanner.nextInt();
+            if (valor < 0) {
+                 System.out.println("Valor negativo inválido. Usando padrão: " + padrao);
+                 valor = padrao;
+            } else if (valor > maximo) {
+                System.out.println("Valor excede o máximo (" + maximo + "). Reduzindo para " + maximo);
+                valor = maximo;
             }
+        } catch (Exception e) {
+            valor = padrao; 
+            System.out.println("Entrada inválida. Usando valor padrão: " + padrao);
+            // Limpa o buffer do scanner em caso de erro de tipo
+            if (scanner.hasNextLine()) scanner.nextLine(); 
         }
-
-        // --- Fim da Simulação ---
-        System.out.println("\nSimulação encerrada após " + iteracao + " segundos.");
-        System.out.println("Resultado: " + tabuleiro.getMensagemFim());
-        tabuleiro.imprimirTabuleiro(); // Mostra estado final
-        System.out.println(tabuleiro.getEstatisticas());
-
-        // Esperar as threads terminarem (opcional, mas boa prática)
-        System.out.println("Aguardando finalização das threads...");
-        // Usar cópia da lista para evitar ConcurrentModificationException se a lista mestre for modificada
-        List<Elemento> copiaElementos = new ArrayList<>(elementosParaIniciar);
-        for (Elemento e : copiaElementos) {
-            try {
-                e.join(1000); // Espera a thread terminar com timeout de 1 segundo
-            } catch (InterruptedException ex) {
-                // Ignorar ou logar
-            }
-        }
-        System.out.println("Todas as threads de elementos finalizaram ou timeout atingido.");
+        return valor;
     }
 }
+
