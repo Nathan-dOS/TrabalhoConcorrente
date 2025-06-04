@@ -32,17 +32,12 @@ public abstract class Elemento extends Thread {
 
     /**
      * Atualiza a posição interna do elemento.
-     * Chamado pelo Tabuleiro após um movimento bem-sucedido.
      */
     public void updatePosition(int novoX, int novoY) {
         this.x = novoX;
         this.y = novoY;
     }
 
-    /**
-     * Lógica principal da thread do elemento (movimento, interação).
-     * Esta será implementada nas subclasses Azul e Zumbi.
-     */
     @Override
     public abstract void run();
 
