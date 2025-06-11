@@ -4,9 +4,6 @@ import java.util.Random;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Classe principal que configura a simulação e lança a GUI JavaFX.
- */
 public class Simulacao {
 
     public static void main(String[] args) {
@@ -67,21 +64,21 @@ public class Simulacao {
         // Código após o fechamento da GUI (se necessário)
         System.out.println("\nSimulação (e GUI) encerrada.");
         if (tabuleiro.isJogoAcabou()) {
-             System.out.println("Resultado final: " + tabuleiro.getMensagemFim());
-             System.out.println(tabuleiro.getEstatisticas());
+            System.out.println("Resultado final: " + tabuleiro.getMensagemFim());
+            System.out.println(tabuleiro.getEstatisticas());
         } else {
-             System.out.println("Simulação interrompida antes do fim.");
+            System.out.println("Simulação interrompida antes do fim.");
         }
     }
     
     // Helper para ler inteiro com valor padrão e limite
     private static int lerInteiro(Scanner scanner, int padrao, int maximo) {
         int valor;
-         try {
+        try {
             valor = scanner.nextInt();
             if (valor < 0) {
-                 System.out.println("Valor negativo inválido. Usando padrão: " + padrao);
-                 valor = padrao;
+                System.out.println("Valor negativo inválido. Usando padrão: " + padrao);
+                valor = padrao;
             } else if (valor > maximo) {
                 System.out.println("Valor excede o máximo (" + maximo + "). Reduzindo para " + maximo);
                 valor = maximo;

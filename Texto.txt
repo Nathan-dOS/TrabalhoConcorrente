@@ -1,0 +1,12 @@
+Git for Windows ou winget install --id Git.Git -e --source winget
+
+git clone https://github.com/Nathan-dOS/TrabalhoConcorrente.git
+
+OpenJDK ou winget install Microsoft.OpenJDK.21
+
+
+javac --module-path /usr/share/openjfx/lib --add-modules javafx.controls,javafx.fxml -d out Simulacao.java   
+
+
+java --module-path /usr/share/openjfx/lib --add-modules javafx.controls,javafx.fxml -cp out Simulacao
+

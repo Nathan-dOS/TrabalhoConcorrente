@@ -1,12 +1,6 @@
 import java.util.concurrent.locks.Lock;
 
-/**
- * Classe abstrata que representa um elemento no tabuleiro.
- * Cada elemento (Azul ou Zumbi) será uma thread.
- */
 public abstract class Elemento extends Thread {
-    // Posição é volátil para garantir visibilidade entre threads,
-    // embora o acesso principal seja protegido por locks no Tabuleiro.
     protected volatile int x, y;
     protected Tabuleiro tabuleiro;
     protected final int tipo; // 1 para Azul, 2 para Zumbi
@@ -30,9 +24,6 @@ public abstract class Elemento extends Thread {
         return tipo;
     }
 
-    /**
-     * Atualiza a posição interna do elemento.
-     */
     public void updatePosition(int novoX, int novoY) {
         this.x = novoX;
         this.y = novoY;

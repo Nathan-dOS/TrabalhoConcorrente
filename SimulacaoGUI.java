@@ -21,7 +21,7 @@ public class SimulacaoGUI extends Application {
     private Rectangle[][] cells;
     private final int CELL_SIZE = 10; // Tamanho de cada célula em pixels
     private long lastUpdateTime = 0;
-    private final long UPDATE_INTERVAL_NS = 500_000_000; // Intervalo de atualização (0.5 segundos)
+    private final long UPDATE_INTERVAL_NS = 100_000_000; // Intervalo de atualização (0.1 segundos)
 
     // Método estático para passar os dados da simulação principal
     public static void setTabuleiro(Tabuleiro tab) {
@@ -91,7 +91,7 @@ public class SimulacaoGUI extends Application {
         primaryStage.setOnCloseRequest(event -> {
             System.out.println("Janela fechada. Interrompendo simulação...");
             if (!tabuleiro.isJogoAcabou()) {
-                 tabuleiro.terminarJogo("Janela fechada pelo usuário.");
+                tabuleiro.terminarJogo("Janela fechada pelo usuário.");
             }
             // Espera um pouco para as threads terminarem
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
@@ -119,6 +119,5 @@ public class SimulacaoGUI extends Application {
         });
     }
 
-    // O método main agora estará em Simulacao.java e chamará Application.launch()
 }
 

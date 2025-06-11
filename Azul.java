@@ -5,10 +5,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Collections;
 
-/**
- * Representa um elemento do tipo Azul.
- * Lógica de movimento com bias progressivo implementada.
- */
 public class Azul extends Elemento {
     private final Random random = new Random();
     private static final double PROB_INICIAL_DIRECAO = 1.0 / 8.0; // Chance igual inicial
@@ -32,12 +28,12 @@ public class Azul extends Elemento {
                 int currentX = this.x;
                 int currentY = this.y;
 
-                // 1. Adquirir lock da posição atual
+                // Adquire lock da posição atual
                 currentLock = tabuleiro.getLock(currentX, currentY);
                 if (currentLock == null) continue;
                 currentLock.lock();
 
-                // Verificar se ainda estamos na célula (não fomos convertidos)
+                // Verificar se ainda estão na célula 
                 if (tabuleiro.getPosicao(currentX, currentY) != this.tipo || Thread.currentThread().isInterrupted()) {
                     break; // Fomos convertidos ou interrompidos
                 }
@@ -67,8 +63,7 @@ public class Azul extends Elemento {
         System.out.println("Thread Azul ID " + getId() + " terminando.");
     }
 
-    // Tenta mover o elemento com bias progressivo. Retorna true se moveu, false caso contrário.
-    // Assume que o lock da célula atual (currentX, currentY) JÁ ESTÁ ADQUIRIDO.
+    // Tenta mover o elemento com bias progressivo.
     private boolean tentarMoverComBias(int currentX, int currentY) {
         long segundosPassados = tabuleiro.getSegundosPassados();
         double probDireita = Math.min(MAX_PROB_BIAS, PROB_INICIAL_DIRECAO + INCREMENTO_BIAS_POR_SEGUNDO * segundosPassados);

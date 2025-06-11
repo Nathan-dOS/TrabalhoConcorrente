@@ -5,19 +5,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Representa o tabuleiro do jogo.
- * REVERTIDO: Usa int[][] grid para ocupação única.
- * Mantém Lock[][] para sincronizar conversões.
- */
 public class Tabuleiro {
     private final int altura;
     private final int largura;
-    // REVERTIDO: Ocupação única por célula (0: vazio, 1: Azul, 2: Zumbi)
     private final int[][] grid;
-    // Mantido: Locks para sincronizar acesso durante conversões
     private final Lock[][] locks;
-    // Mantido: Lista mestre sincronizada para referência às threads
     public final List<Elemento> elementos;
     private volatile boolean jogoAcabou = false;
     private String mensagemFim = "";
